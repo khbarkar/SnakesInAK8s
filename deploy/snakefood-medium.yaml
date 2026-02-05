@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: snakefood
+  namespace: snakefood
+  labels:
+    app: snakefood
+    size: medium
+spec:
+  replicas: 50
+  selector:
+    matchLabels:
+      app: snakefood
+  template:
+    metadata:
+      labels:
+        app: snakefood
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: morsel
+          image: registry.k8s.io/pause:3.9
+          resources:
+            requests:
+              cpu: 1m
+              memory: 4Mi
+            limits:
+              cpu: 1m
+              memory: 4Mi
