@@ -77,10 +77,10 @@ func (g *Game) Tick() []Pod {
 }
 
 // PlacePod adds a pod to the board at a random free position.
-// The caller provides the pod metadata from Kubernetes.
-func (g *Game) PlacePod(name, namespace string) {
+// Returns true if the pod was placed, false if the board is full.
+func (g *Game) PlacePod(name, namespace string) bool {
 	if len(g.Pods) >= g.MaxPods {
-		return
+		return false
 	}
 
 	occupied := g.Snake.Body
@@ -94,6 +94,7 @@ func (g *Game) PlacePod(name, namespace string) {
 		Name:      name,
 		Namespace: namespace,
 	})
+	return true
 }
 
 // TogglePause pauses or resumes the game.

@@ -11,10 +11,10 @@ DEPLOY_DIR := deploy
 ## ---- Build & Run ----
 
 build: ## Build the binary
-	$(GO) build -o $(BINARY) .
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o bin/$(BINARY) .
 
 run: build ## Build and run the game
-	./$(BINARY)
+	bin/$(BINARY)
 
 run-ns: build ## Run targeting a specific namespace: make run-ns NS=snakefood
 	./$(BINARY) --kubeconfig=$(KUBECONFIG)
@@ -56,7 +56,7 @@ pods: ## List running snakefood pods
 ## ---- Misc ----
 
 clean: ## Remove build artifacts
-	rm -f $(BINARY)
+	rm -rf bin/
 
 commit: lint test ## Lint, test, then open a commit prompt
 	git add -A

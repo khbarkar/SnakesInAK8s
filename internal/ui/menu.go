@@ -58,6 +58,22 @@ func NewMenuModel(kubeconfigPath string) MenuModel {
 	}
 }
 
+// NewMenuModelFromGame rebuilds the menu from a running game, preserving
+// the k8s client, namespace selection, and terminal dimensions.
+func NewMenuModelFromGame(g GameModel) MenuModel {
+	return MenuModel{
+		theme:          g.theme,
+		kubeconfigPath: g.kubeconfig,
+		namespace:      g.namespace,
+		k8sClient:      g.k8sClient,
+		clusterName:    g.clusterName,
+		width:          g.width,
+		height:         g.height,
+		state:          menuMain,
+		cursor:         0,
+	}
+}
+
 func (m MenuModel) Init() tea.Cmd {
 	return connectK8sCmd(m.kubeconfigPath)
 }
@@ -113,8 +129,7 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// Main menu items: [Start Game] [Select Namespace] [Quit]
-var mainMenuItems = []string{"Start Game", "Select Namespace", "Quit"}
+var mainMenuItems = []string{"Start Game", "Select Namespace", "Exit"}
 
 func (m MenuModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -129,11 +144,12 @@ func (m MenuModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		switch m.cursor {
 		case 0: // Start Game
-			gameModel := NewGameModel(m.k8sClient, m.namespace, m.theme)
+			m.k8sClient.SetNamespace(m.namespace)
+			gameModel := NewGameModel(m.k8sClient, m.namespace, m.theme, m.width, m.height, m.kubeconfigPath)
 			return gameModel, gameModel.Init()
 		case 1: // Select Namespace
 			return m, fetchNamespacesCmd(m.k8sClient)
-		case 2: // Quit
+		case 2: // Exit
 			return m, tea.Quit
 		}
 	}
@@ -161,7 +177,7 @@ func (m MenuModel) updateNamespace(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.state = menuMain
 		m.cursor = 0
-	case "escape", "q":
+	case "esc", "q":
 		m.state = menuMain
 		m.cursor = 0
 	}
@@ -173,7 +189,7 @@ func (m MenuModel) updateError(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.state = menuConnecting
 		return m, connectK8sCmd(m.kubeconfigPath)
-	case "q", "escape":
+	case "q", "esc":
 		return m, tea.Quit
 	}
 	return m, nil

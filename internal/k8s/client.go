@@ -87,6 +87,11 @@ func (c *Client) Namespace() string {
 	return c.namespace
 }
 
+// SetNamespace updates the namespace filter.
+func (c *Client) SetNamespace(ns string) {
+	c.namespace = ns
+}
+
 // ListNamespaces returns all namespace names in the cluster.
 func (c *Client) ListNamespaces(ctx context.Context) ([]string, error) {
 	nsList, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
@@ -103,7 +108,8 @@ func (c *Client) ListNamespaces(ctx context.Context) ([]string, error) {
 // RandomPod picks a random running pod, filtered by the client's namespace.
 // If namespace is empty, picks from all namespaces.
 // Only picks pods with the label app=snakefood to avoid killing real workloads.
-func (c *Client) RandomPod(ctx context.Context) (*PodInfo, error) {
+// Pods whose names appear in exclude are skipped.
+func (c *Client) RandomPod(ctx context.Context, exclude map[string]bool) (*PodInfo, error) {
 	ns := c.namespace // empty string = all namespaces in the API
 
 	pods, err := c.clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
@@ -114,15 +120,20 @@ func (c *Client) RandomPod(ctx context.Context) (*PodInfo, error) {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
-	if len(pods.Items) == 0 {
+	// Filter out excluded pods
+	var candidates []PodInfo
+	for _, p := range pods.Items {
+		if !exclude[p.Name] {
+			candidates = append(candidates, PodInfo{Name: p.Name, Namespace: p.Namespace})
+		}
+	}
+
+	if len(candidates) == 0 {
 		return nil, nil
 	}
 
-	pick := pods.Items[rand.Intn(len(pods.Items))]
-	return &PodInfo{
-		Name:      pick.Name,
-		Namespace: pick.Namespace,
-	}, nil
+	pick := candidates[rand.Intn(len(candidates))]
+	return &pick, nil
 }
 
 // KillPod force-deletes the given pod. Brutal.

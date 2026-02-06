@@ -20,10 +20,3 @@ spec:
       containers:
         - name: morsel
           image: registry.k8s.io/pause:3.9
-          resources:
-            requests:
-              cpu: 1m
-              memory: 4Mi
-            limits:
-              cpu: 1m
-              memory: 4Mi

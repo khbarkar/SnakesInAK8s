@@ -38,17 +38,20 @@ type GameModel struct {
 	game        *game.Game
 	theme       Theme
 	killLog     []string
+	knownPods   map[string]bool // pods currently on board or recently killed
 	clusterName string
 	namespace   string
 	k8sClient   *k8s.Client
 	width       int
 	height      int
 	tickRate    time.Duration
-	fetching    bool // true while a pod fetch is in flight
+	fetching    bool   // true while a pod fetch is in flight
+	kubeconfig  string // needed to rebuild menu on return
+	podStatus   string // status message for pod fetching
 }
 
 // NewGameModel creates the game model with a connected k8s client.
-func NewGameModel(client *k8s.Client, namespace string, theme Theme) GameModel {
+func NewGameModel(client *k8s.Client, namespace string, theme Theme, width, height int, kubeconfig string) GameModel {
 	clusterName := "unknown"
 	if client != nil {
 		clusterName = client.ClusterName()
@@ -58,20 +61,22 @@ func NewGameModel(client *k8s.Client, namespace string, theme Theme) GameModel {
 		game:        game.New(boardWidth, boardHeight),
 		theme:       theme,
 		killLog:     []string{},
+		knownPods:   make(map[string]bool),
 		clusterName: clusterName,
 		namespace:   namespace,
 		k8sClient:   client,
 		tickRate:    defaultTickRate,
+		width:       width,
+		height:      height,
+		kubeconfig:  kubeconfig,
 	}
 }
 
-// Init starts the tick loop and fetches initial pods.
+// Init starts the tick loop and kicks off the first pod fetch.
 func (m GameModel) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(m.tickRate),
-		fetchPodCmd(m.k8sClient),
-		fetchPodCmd(m.k8sClient),
-		fetchPodCmd(m.k8sClient),
+		fetchPodCmd(m.k8sClient, m.knownPods),
 	)
 }
 
@@ -81,8 +86,11 @@ func (m GameModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "ctrl+c":
 			return m, tea.Quit
+		case "esc":
+			menu := NewMenuModelFromGame(m)
+			return menu, nil
 		case "up", "w":
 			m.game.Snake.SetDirection(game.Up)
 		case "down", "s":
@@ -111,7 +119,7 @@ func (m GameModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Replenish pods on the board
 		if len(m.game.Pods) < m.game.MaxPods && !m.fetching {
 			m.fetching = true
-			cmds = append(cmds, fetchPodCmd(m.k8sClient))
+			cmds = append(cmds, fetchPodCmd(m.k8sClient, m.knownPods))
 		}
 
 		cmds = append(cmds, tickCmd(m.tickRate))
@@ -119,14 +127,24 @@ func (m GameModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case podPlacedMsg:
 		m.fetching = false
-		if msg.Err == nil && msg.Name != "" {
-			m.game.PlacePod(msg.Name, msg.Namespace)
+		if msg.Err != nil {
+			m.podStatus = "fetch error: " + msg.Err.Error()
+		} else if msg.Name == "" {
+			m.podStatus = "no snakefood pods found -- run: make deploy-small"
+		} else if !m.knownPods[msg.Name] {
+			if m.game.PlacePod(msg.Name, msg.Namespace) {
+				m.knownPods[msg.Name] = true
+				m.podStatus = ""
+			}
 		}
 
 	case podKilledMsg:
 		if msg.Err != nil {
 			m.killLog = append(m.killLog, "FAILED: "+msg.Namespace+"/"+msg.Name+" -- "+msg.Err.Error())
 		}
+		// Pod is dead, remove from known so the name slot is freed
+		// (won't come back from the API anyway since it's deleted)
+		delete(m.knownPods, msg.Name)
 	}
 
 	return m, nil
@@ -160,11 +178,19 @@ func (m GameModel) View() string {
 		killLines += m.theme.KillLogStyle.Render("  killed: "+entry) + "\n"
 	}
 
+	var statusLine string
+	if m.podStatus != "" {
+		statusLine = lipgloss.NewStyle().
+			Foreground(m.theme.AccentSoft).
+			Italic(true).
+			Render("  " + m.podStatus)
+	}
+
 	nsLabel := "all"
 	if m.namespace != "" {
 		nsLabel = m.namespace
 	}
-	controls := m.theme.FooterStyle.Render("[wasd/arrows] move  [space] pause  [q] quit  ns:" + nsLabel)
+	controls := m.theme.FooterStyle.Render("[wasd/arrows] move  [space] pause  [esc] menu  ns:" + nsLabel)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -172,6 +198,7 @@ func (m GameModel) View() string {
 		board,
 		"",
 		killLines,
+		statusLine,
 		footer,
 		controls,
 	)
@@ -183,14 +210,19 @@ func tickCmd(d time.Duration) tea.Cmd {
 	})
 }
 
-func fetchPodCmd(client *k8s.Client) tea.Cmd {
+func fetchPodCmd(client *k8s.Client, exclude map[string]bool) tea.Cmd {
+	// Snapshot the exclude set so the goroutine doesn't race with Update.
+	snapshot := make(map[string]bool, len(exclude))
+	for k := range exclude {
+		snapshot[k] = true
+	}
 	return func() tea.Msg {
 		if client == nil {
 			return podPlacedMsg{Err: nil}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		pod, err := client.RandomPod(ctx)
+		pod, err := client.RandomPod(ctx, snapshot)
 		if err != nil {
 			return podPlacedMsg{Err: err}
 		}

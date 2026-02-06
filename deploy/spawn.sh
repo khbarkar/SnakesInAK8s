@@ -42,11 +42,7 @@ for i in $(seq 1 "$COUNT"); do
         "terminationGracePeriodSeconds": 0,
         "containers": [{
           "name": "morsel",
-          "image": "registry.k8s.io/pause:3.9",
-          "resources": {
-            "requests": {"cpu": "1m", "memory": "4Mi"},
-            "limits": {"cpu": "1m", "memory": "4Mi"}
-          }
+          "image": "registry.k8s.io/pause:3.9"
         }]
       }
     }' 2>/dev/null || true
